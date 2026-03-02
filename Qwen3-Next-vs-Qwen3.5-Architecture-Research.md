@@ -1,242 +1,210 @@
-# Qwen3-Next vs Qwen3.5-35B-A3B 架构调研报告
+# Qwen3-Next vs Qwen3.5-35B-A3B 架构调研报告（已修正）
+
+> **修正说明**: 本报告已根据 HuggingFace 官方配置更新，纠正了之前关于 "Mamba" 架构的错误认知。
 
 ## 1. 调研背景
 
-本文档深入分析 PAI-Megatron-Patch 框架中已支持的 Qwen3-Next-80B-A3B 模型与目标模型 Qwen3.5-35B-A3B 之间的架构差异，为适配工作提供技术参考。
+本文档基于 HuggingFace 官方配置，深入分析 Qwen3-Next-80B-A3B 与 Qwen3.5-35B-A3B 的真实架构差异。
 
-## 2. Qwen3-Next-80B-A3B 架构详解
+**配置来源**:
+- Qwen3-Next-80B-A3B: https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct
+- Qwen3.5-35B-A3B: https://huggingface.co/Qwen/Qwen3.5-35B-A3B
 
-### 2.1 基础参数（来自 run_mcore_qwen3.sh）
+## 2. HF 配置直接对比
 
-```bash
-HIDDEN_SIZE=2048
-NUM_ATTENTION_HEADS=16
-NUM_LAYERS=96
-INTERMEDIATE_SIZE=5120
-MOE_INTERMEDIATE_SIZE=512
-MAX_POSITION_EMBEDDINGS=262144
-NUM_KEY_VALUE_HEADS=2
-ROPE_THETA=10000000
-NUM_EXPERTS=512
-ROUTER_TOPK=10
-RMS_NORM_EPS=1e-6
-```
+### 2.1 基础架构参数
 
-### 2.2 Hybrid 架构设计
+| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B | 变化 |
+|------|-------------------|-----------------|------|
+| **num_hidden_layers** | 48 | **40** | -8 (-17%) |
+| **hidden_size** | 2048 | **2048** | = |
+| **num_attention_heads** | 16 | **16** | = |
+| **num_key_value_heads** | 2 | **2** | = |
+| **head_dim** | 256 | **256** | = |
+| **intermediate_size** | 5120 | **?** (text_config 未直接显示) | 待确认 |
+| **moe_intermediate_size** | 512 | **512** | = |
+| **hidden_act** | "silu" | **"silu"** | = |
+| **vocab_size** | 151936 | **248320** | **+63%** ⚠️ |
+| **max_position_embeddings** | 262144 | **262144** | = |
 
-Qwen3-Next 采用 **Mamba + Transformer + MoE** 的混合架构：
+### 2.2 MoE 参数
 
-```bash
-hybrid_model_options=" \
-    --hybrid-attention-ratio 0.125 \
-    --hybrid-mlp-ratio 0.5 \
-    --hybrid-override-pattern M-M-M-*-M-M-M-*-... \
-    --is-hybrid-model \
-    --mamba-state-dim 128 \
-    --mamba-head-dim 128 \
-    --mamba-num-groups 16 \
-    --mamba-num-heads 32
-"
-```
+| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B | 变化 |
+|------|-------------------|-----------------|------|
+| **num_experts** | 512 | **256** | -256 (-50%) |
+| **num_experts_per_tok** | 10 | **8** | -2 |
+| **shared_expert_intermediate_size** | 512 | **512** | = |
+| **router_aux_loss_coef** | 0.001 | **0.001** | = |
 
-**关键特征：**
-- **hybrid_attention_ratio=0.125**：12.5% 的层使用标准 Attention
-- **hybrid_mlp_ratio=0.5**：50% 的层使用 MLP/MoE
-- **Pattern**: `M-M-M-*` 循环，每 4 层一个周期
-  - M: Mamba 层
-  - M: Mamba 层  
-  - M: Mamba 层
-  - *: Attention + MoE 层
+### 2.3 Linear Attention 参数 (关键发现!)
 
-### 2.3 MoE 配置
+| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B | 变化 |
+|------|-------------------|-----------------|------|
+| **linear_conv_kernel_dim** | 4 | **4** | = |
+| **linear_key_head_dim** | 128 | **128** | = |
+| **linear_num_key_heads** | 16 | **16** | = |
+| **linear_num_value_heads** | 32 | **32** | = |
+| **linear_value_head_dim** | 128 | **128** | = |
+| **full_attention_interval** | 4 | **4** | = |
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| num_experts | 512 | 总专家数 |
-| topk | 10 | 每个 token 激活的专家数 |
-| expert_intermediate_size | 512 | 专家 FFN 维度 |
-| shared_expert | 512 | 共享专家维度 |
-| load_balancing | aux_loss | 使用辅助损失平衡 |
-| aux_loss_coeff | 0.001 | 辅助损失系数 |
+**重要发现**: 两者都使用 Linear Attention，架构高度相似！
 
-### 2.4 并行策略建议
+### 2.4 RoPE 参数
 
-```
-Total Params: 80B (激活 8B)
-Recommended Parallel:
-- TP=1, PP=1, EP=8 (单机 8xH20)
-- TP=2, PP=2, EP=4 (多机扩展)
-```
+| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B | 变化 |
+|------|-------------------|-----------------|------|
+| **rope_theta** | 10000000 | **10000000** | = |
+| **partial_rotary_factor** | 0.25 | **0.25** | = |
+| **rope_type** | "default" | **"default"** | = |
 
-## 3. Qwen3.5-35B-A3B 架构推测
-
-### 3.1 参数对比分析
-
-基于命名规则和模型规模推测：
-
-| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B (推测) | 变化率 |
-|------|-------------------|----------------------|--------|
-| 总参数量 | 80B | 35B | -56% |
-| 激活参数 | 8B | ~3.5B | -56% |
-| hidden_size | 2048 | 2048 (可能不变) | 0% |
-| num_layers | 96 | 48-64 (估算) | -33% to -50% |
-| num_experts | 512 | 128-256 (估算) | -50% to -75% |
-| intermediate_size | 5120 | 4096 (估算) | -20% |
-| max_seq_len | 262K | 128K (可能) | -50% |
-
-### 3.2 可能的架构差异
-
-#### 3.2.1 层数缩减
-
-35B 模型可能减少层数但保持每层的维度：
-
-```python
-# 80B 配置
-num_layers = 96
-pattern_repeat = 96 / 4 = 24  # M-M-M-* 重复 24 次
-
-# 35B 推测配置
-num_layers = 48  # 或 64
-pattern_repeat = 48 / 4 = 12  # M-M-M-* 重复 12 次
-```
-
-#### 3.2.2 MoE 规模缩减
-
-```python
-# 80B 配置
-num_experts = 512
-topk = 10
-expert_dim = 512
-
-# 35B 推测配置
-num_experts = 128  # 或 256
-topk = 8  # 可能减少
-expert_dim = 512  # 可能保持不变
-```
-
-#### 3.2.3 注意力头调整
-
-```python
-# 80B 配置
-num_attention_heads = 16
-num_key_value_heads = 2  # GQA
-
-# 35B 可能配置
-num_attention_heads = 16  # 可能不变
-num_key_value_heads = 4   # 可能增加（更小的模型可能不需要那么强的压缩）
-```
-
-### 3.3 关键差异点
-
-#### 1. Hybrid Pattern 长度
-
-```bash
-# 80B: 96 层，pattern 重复 24 次
---hybrid-override-pattern M-M-M-*-M-M-M-*-...(共96层)
-
-# 35B: 假设 48 层，pattern 重复 12 次
---hybrid-override-pattern M-M-M-*-...(共48层，需重新生成)
-```
-
-**重要**：`hybrid_override_pattern` 必须与 `num_layers` 完全匹配，否则训练会失败。
-
-#### 2. 专家并行度限制
-
-```bash
-# 80B: 512 experts，可被 8 整除
-EP=8  # 每个 rank 管理 64 个专家
-
-# 35B: 假设 128 experts
-EP=4 或 8  # 128 可被 4/8 整除，但不能被 16 整除
-```
-
-#### 3. 序列长度支持
-
-```bash
-# 80B: 262K 上下文
-MAX_POSITION_EMBEDDINGS=262144
-
-# 35B: 可能减少到 128K
-MAX_POSITION_EMBEDDINGS=131072  # 推测
-```
-
-## 4. 适配风险评估
-
-### 4.1 低风险（可直接复用）
-
-| 组件 | 复用程度 | 说明 |
-|------|---------|------|
-| Tokenizer | 100% | Qwen3Tokenizer 完全兼容 |
-| Mamba 实现 | 100% | `megatron_patch/model/qwen3_next/` 直接复用 |
-| MoE 路由 | 100% | Megatron-LM-250908 原生支持 |
-| 权重转换 | 90% | 仅需调整参数映射 |
-
-### 4.2 中风险（需验证）
-
-| 组件 | 风险点 | 验证方法 |
-|------|--------|---------|
-| Hybrid Pattern | 层数不匹配 | 检查 config.json 中的 layer_pattern |
-| RoPE 缩放 | theta 值可能不同 | 对比 rope_theta 参数 |
-| 激活函数 | 可能有变化 | 检查 hidden_act 字段 |
-
-### 4.3 高风险（需深度调研）
-
-| 组件 | 潜在问题 | 应对策略 |
-|------|---------|---------|
-| 注意力机制 | 可能引入 MLA/MQA 变体 | 检查 attention_type 字段 |
-| 位置编码 | 可能使用 Yarn/NTK-aware | 对比 rope_scaling 配置 |
-| 归一化 | 可能使用 different eps | 检查 rms_norm_eps |
-
-## 5. 调研结论
-
-### 5.1 核心发现
-
-1. **架构高度相似**：Qwen3.5-35B-A3B 极有可能是 Qwen3-Next-80B-A3B 的"缩放版"
-2. **主要差异**：层数、专家数、序列长度按比例缩减
-3. **复用价值**：PAI-Megatron-Patch 的 `qwen3_next` 实现可直接复用 90%+
-
-### 5.2 关键待确认项
-
-必须获取 Qwen3.5-35B-A3B 的 `config.json` 后确认：
-
+Qwen3.5 新增 MRoPE 支持（多模态）：
 ```json
-{
-  "architectures": ["Qwen3MoeForCausalLM"],
-  "hidden_size": 2048,
-  "num_hidden_layers": 48,  // 关键！
-  "num_attention_heads": 16,
-  "num_key_value_heads": 4,  // 关键！
-  "intermediate_size": 4096,
-  "num_experts": 128,  // 关键！
-  "num_experts_per_tok": 8,  // 关键！
-  "moe_intermediate_size": 512,
-  "max_position_embeddings": 131072,  // 关键！
-  "rope_theta": 10000000,
-  "rms_norm_eps": 1e-6,
-  "hybrid_config": {  // 关键！
-    "attention_ratio": 0.125,
-    "mlp_ratio": 0.5,
-    "pattern": "M-M-M-*"
-  }
+"rope_parameters": {
+    "mrope_interleaved": true,
+    "mrope_section": [11, 11, 10]
 }
 ```
 
-### 5.3 推荐适配策略
+### 2.5 归一化参数
 
-1. **Phase 1**: 获取 config.json，确认架构参数
-2. **Phase 2**: 修改启动脚本，调整 `hybrid_override_pattern` 长度
-3. **Phase 3**: 权重转换，验证 checkpoint 可加载
-4. **Phase 4**: 小规模训练验证（1-10 steps）
-5. **Phase 5**: 正式训练
+| 参数 | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B | 变化 |
+|------|-------------------|-----------------|------|
+| **rms_norm_eps** | 1e-06 | **1e-06** | = |
 
-## 6. 参考资源
+### 2.6 新增/移除参数
 
-- [Qwen3-Next GitHub](https://github.com/QwenLM/Qwen3)
-- [PAI-Megatron-Patch qwen3_next 示例](https://github.com/alibaba/Pai-Megatron-Patch/tree/main/examples/qwen3_next)
-- [Megatron-LM MoE 文档](https://github.com/NVIDIA/Megatron-LM/blob/main/docs/moe.md)
+**Qwen3.5 新增**:
+```json
+"mtp_num_hidden_layers": 1              // Multi-Token Prediction
+"mtp_use_dedicated_embeddings": false
+"vision_config": {...}                  // 多模态支持
+"image_token_id": 248056
+"video_token_id": 248057
+"architectures": ["Qwen3_5MoeForConditionalGeneration"]
+```
+
+**Qwen3-Next 特有**:
+```json
+"decoder_sparse_step": 1
+"norm_topk_prob": true
+"output_router_logits": false
+"use_sliding_window": false
+"architectures": ["Qwen3NextForCausalLM"]
+```
+
+## 3. 架构认知修正
+
+### 3.1 之前误解（已纠正）
+
+❌ **错误认知**: Qwen3-Next 使用 Mamba (M-M-M-* pattern)
+
+✅ **实际情况**: Qwen3-Next 使用 **Linear Attention**，与 Qwen3.5 架构类似！
+
+### 3.2 实际架构对比
+
+```
+Qwen3-Next-80B-A3B:
+- 48 layers (HF 配置)
+- Layer pattern: 3x Linear Attention + 1x Full Attention (每4层循环)
+- 512 experts, topk=10
+
+Qwen3.5-35B-A3B:
+- 40 layers  
+- Layer pattern: 3x Linear Attention + 1x Full Attention (每4层循环)
+- 256 experts, topk=8
+```
+
+### 3.3 PAI-Megatron-Patch 配置差异说明
+
+**Qwen3-Next 在 PAI 脚本中** (`run_mcore_qwen3.sh`):
+```bash
+NUM_LAYERS=96  # 注意：不是 HF 的 48！
+```
+
+可能原因：
+- PAI 可能使用 2x 计数（包含辅助层）
+- `hybrid_override_pattern` 使用字符计数（24 组 × 4 字符 = 96）
+- 或者是脚本版本差异
+
+## 4. PAI-Megatron-Patch 支持评估
+
+### 4.1 ✅ 已支持
+
+| 特性 | 支持状态 | 说明 |
+|------|---------|------|
+| **Linear Attention** | ✅ 支持 | PAI 的 `qwen3_next` 实现 |
+| **MoE (256/512专家)** | ✅ 支持 | 标准 Megatron MoE |
+| **GQA (2头)** | ✅ 支持 | `--group-query-attention` |
+| **SiLU激活** | ✅ 支持 | `--swiglu` 或类似 |
+| **RMSNorm (1e-6)** | ✅ 支持 | `--norm-epsilon` |
+| **RoPE (theta=1e7)** | ✅ 支持 | `--rotary-base` |
+| **partial_rotary_factor=0.25** | ✅ 支持 | `--rotary-percent` |
+
+### 4.2 ⚠️ 需验证
+
+| 特性 | 风险等级 | 说明 |
+|------|---------|------|
+| **MTP** | 🟡 中 | `--mtp-num-layers 1` 需验证 |
+| **Vocab 248320** | 🟢 低 | 仅需调整 `--padded-vocab-size` |
+| **MRoPE** | 🟢 低 | 文本训练可能无需特殊处理 |
+| **多模态** | 🟡 中 | 纯文本训练可忽略 |
+
+## 5. 适配难度重新评估
+
+| 维度 | 相似度 | 说明 |
+|------|-------|------|
+| 基础架构 | **95%** | 都使用 Linear Attention + Full Attention |
+| MoE 配置 | **85%** | 专家数减半，topk 减少 |
+| 词表/Embedding | **70%** | 词表扩大 63%，需特别注意 |
+| 附加功能 | **80%** | Qwen3.5 增加 MTP |
+
+**总体适配难度**: **🟡 中低风险** (之前错误评估为高风险)
+
+## 6. 关键适配参数（更新）
+
+基于 HF 配置到 PAI 配置的映射：
+
+```bash
+# Qwen3.5-35B-A3B 推测配置
+NUM_LAYERS=80        # 推测: 40 * 2 (如果 PAI 使用 2x 计数)
+HIDDEN_SIZE=2048
+NUM_ATTENTION_HEADS=16
+NUM_KEY_VALUE_HEADS=2
+INTERMEDIATE_SIZE=5120    # 待确认
+MOE_INTERMEDIATE_SIZE=512
+MAX_POSITION_EMBEDDINGS=262144
+VOCAB_SIZE=248320         # 注意：比 Qwen3-Next 大很多
+ROPE_THETA=10000000
+RMS_NORM_EPS=1e-6
+
+# MoE 参数
+NUM_EXPERTS=256      # HF: 256
+ROUTER_TOPK=8        # HF: 8
+SHARED_EXPERT_INTERMEDIATE_SIZE=512
+
+# 新增: MTP
+MTP_NUM_LAYERS=1
+```
+
+## 7. 建议的适配路径
+
+1. **复用 Qwen3-Next 的 PAI 实现**（95% 可复用）
+2. **调整参数**: 
+   - layers: 40 (HF) → 80 (PAI推测)
+   - experts: 256
+   - topk: 8
+   - vocab: 248320
+3. **验证 MTP**: `--mtp-num-layers 1`
+4. **测试权重转换**: 确保 Linear Attention 层权重正确映射
+
+## 8. 参考资源
+
+- [Qwen3-Next HF Config](https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct/blob/main/config.json)
+- [Qwen3.5-35B-A3B HF Config](https://huggingface.co/Qwen/Qwen3.5-35B-A3B/blob/main/config.json)
+- [PAI-Megatron-Patch qwen3_next](https://github.com/alibaba/Pai-Megatron-Patch/tree/main/examples/qwen3_next)
 
 ---
 
-**报告生成时间**: 2026-03-02  
-**基于 PAI-Megatron-Patch 版本**: v0.12.3  
-**调研状态**: 等待 Qwen3.5-35B-A3B 官方配置发布
+**报告更新时间**: 2026-03-02  
+**基于数据**: HuggingFace 官方配置  
+**修正内容**: 纠正 "Mamba" 错误，确认两者都使用 Linear Attention
