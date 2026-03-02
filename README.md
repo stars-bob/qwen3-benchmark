@@ -14,7 +14,8 @@ qwen3-benchmark/
 ├── Qwen3.5-35B-A3B-Adaptation-Guide.md           # Practical adaptation guide for Qwen3.5
 ├── Qwen3-Next-vs-Qwen3.5-Architecture-Research.md # Architecture comparison (corrected)
 ├── HF-Config-Comparison-Qwen3.5-vs-Qwen3-Next.md  # Raw HF config comparison
-└── ms-swift-Qwen3-Next-vs-Qwen3.5-Research.md     # ms-swift framework support research
+├── ms-swift-Qwen3-Next-vs-Qwen3.5-Research.md     # ms-swift framework support research
+└── PAI-vs-ms-swift-Alignment-Research.md          # Framework alignment verification research
 ```
 
 ## Documents
@@ -56,6 +57,17 @@ Comprehensive research on ms-swift framework's support for both Qwen3-Next and Q
 - 🆕 Qwen3.5 adds MTP (Multi-Token Prediction) support
 - 📋 Includes detailed code analysis and adaptation recommendations
 
+### 5. PAI vs ms-swift Alignment Research
+
+Comprehensive comparison and alignment verification proposal for PAI-Megatron-Patch and ms-swift frameworks.
+
+**Key Topics:**
+- Framework version analysis (Megatron-Core 0.15.x alignment)
+- Architecture implementation comparison
+- Alignment verification methodology
+- Weight, forward, gradient, and training dynamic verification
+- Automated verification scripts proposal
+
 ## Quick Comparison
 
 | Feature | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B |
@@ -82,6 +94,7 @@ Comprehensive research on ms-swift framework's support for both Qwen3-Next and Q
 2. Refer to [Architecture Research](./Qwen3-Next-vs-Qwen3.5-Architecture-Research.md) for technical details
 3. Check [HF Config Comparison](./HF-Config-Comparison-Qwen3.5-vs-Qwen3-Next.md) for raw configuration data
 4. Review [ms-swift Research](./ms-swift-Qwen3-Next-vs-Qwen3.5-Research.md) for framework support analysis
+5. See [Alignment Research](./PAI-vs-ms-swift-Alignment-Research.md) for framework comparison and verification proposal
 
 ## Configuration Sources
 
@@ -97,6 +110,7 @@ Comprehensive research on ms-swift framework's support for both Qwen3-Next and Q
 ## Changelog
 
 ### 2026-03-02
+- **Added PAI vs ms-swift alignment research**: Comprehensive framework comparison and verification proposal
 - **Added ms-swift research report**: Comprehensive analysis of framework support for Qwen3-Next and Qwen3.5
 - **Major Correction**: Both models use Linear Attention, not Mamba
 - Updated adaptation difficulty from "High" to "Medium-Low"
