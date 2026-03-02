@@ -13,7 +13,8 @@ qwen3-benchmark/
 ├── README.md                                      # This file
 ├── Qwen3.5-35B-A3B-Adaptation-Guide.md           # Practical adaptation guide for Qwen3.5
 ├── Qwen3-Next-vs-Qwen3.5-Architecture-Research.md # Architecture comparison (corrected)
-└── HF-Config-Comparison-Qwen3.5-vs-Qwen3-Next.md  # Raw HF config comparison
+├── HF-Config-Comparison-Qwen3.5-vs-Qwen3-Next.md  # Raw HF config comparison
+└── ms-swift-Qwen3-Next-vs-Qwen3.5-Research.md     # ms-swift framework support research
 ```
 
 ## Documents
@@ -44,6 +45,17 @@ Deep analysis of architectural differences between Qwen3-Next-80B-A3B and Qwen3.
 
 Raw side-by-side comparison of HuggingFace configuration files.
 
+### 4. ms-swift Framework Support Research
+
+Comprehensive research on ms-swift framework's support for both Qwen3-Next and Qwen3.5 models.
+
+**Key Findings:**
+- ✅ ms-swift **fully supports** both model series
+- ✅ Both use the same Linear Attention implementation (`GatedDeltaNet`)
+- ⚠️ Vocab size increase from 151936 to 248320 is the main risk point
+- 🆕 Qwen3.5 adds MTP (Multi-Token Prediction) support
+- 📋 Includes detailed code analysis and adaptation recommendations
+
 ## Quick Comparison
 
 | Feature | Qwen3-Next-80B-A3B | Qwen3.5-35B-A3B |
@@ -69,6 +81,7 @@ Raw side-by-side comparison of HuggingFace configuration files.
 1. Follow the [Adaptation Guide](./Qwen3.5-35B-A3B-Adaptation-Guide.md) to set up training
 2. Refer to [Architecture Research](./Qwen3-Next-vs-Qwen3.5-Architecture-Research.md) for technical details
 3. Check [HF Config Comparison](./HF-Config-Comparison-Qwen3.5-vs-Qwen3-Next.md) for raw configuration data
+4. Review [ms-swift Research](./ms-swift-Qwen3-Next-vs-Qwen3.5-Research.md) for framework support analysis
 
 ## Configuration Sources
 
@@ -84,6 +97,7 @@ Raw side-by-side comparison of HuggingFace configuration files.
 ## Changelog
 
 ### 2026-03-02
+- **Added ms-swift research report**: Comprehensive analysis of framework support for Qwen3-Next and Qwen3.5
 - **Major Correction**: Both models use Linear Attention, not Mamba
 - Updated adaptation difficulty from "High" to "Medium-Low"
 - Added MTP support documentation
